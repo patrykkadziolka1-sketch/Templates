@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>body { background: #0f172a; color: white; font-family: sans-serif; }</style>
+</head>
+<body class="p-8">
+    <div class="max-w-4xl mx-auto">
+        <header class="flex justify-between items-center mb-10 border-b border-slate-800 pb-6">
+            <h1 class="text-2xl font-bold text-indigo-400">Panel Lekarza e-Recepty</h1>
+            <div class="bg-slate-800 px-4 py-2 rounded-full text-sm">Status: Online</div>
+        </header>
+
+        <div id="request-list" class="space-y-4">
+            <!-- Wnioski pojawią się tutaj -->
+        </div>
+    </div>
+
+    <script>
+        async function load() {
+            const res = await fetch('/api/requests');
+            const data = await res.json();
+            const list = document.getElementById('request-list');
+            list.innerHTML = data.map(req => `
+                <div class="bg-slate-800 p-6 rounded-2xl flex justify-between items-center border border-slate-700">
+                    <div>
+                        <h3 class="font-bold text-lg text-white">${req.name}</h3>
+                        <p class="text-slate-400 text-sm">PESEL: ${req.pesel} | Godz: ${req.date}</p>
+                        <p class="text-indigo-300 font-bold mt-1">Lek: ${req.medicine}</p>
+                    </div>
+                    <div class="flex gap-2">
+                        ${req.status === 'pending' ? `
+                            <input type="text" id="code-${req.id}" placeholder="Kod e-rec" class="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 w-24">
+                            <button onclick="approve(${req.id})" class="bg-green-600 hover:bg-green-500 px-4 py-2 rounded-lg font-bold transition-all">Zatwierdź</button>
+                        ` : `<span class="text-green-500 font-bold uppercase tracking-widest text-xs">WYSTAWIONO (${req.code})</span>`}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function approve(id) {
+            const code = document.getElementById(`code-${id}`).value;
+            if(!code) return alert("Wpisz kod!");
+            await fetch('/api/approve', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ id, code })
+            });
+            load();
+        }
+
+        setInterval(load, 3000);
+        load();
+    </script>
+</body>
+</html>
