@@ -112,4 +112,12 @@ def run_flask():
     log = logging.getLogger('werkzeug')
     log.disabled = True
     port = int(os.environ.get("PORT", 5000))
-    app.run(
+    app.run(host='0.0.0.0', port=port)
+
+if __name__ == "__main__":
+    print("Uruchamianie serwera Railway...")
+    threading.Thread(target=run_flask, daemon=True).start()
+    
+    bot.remove_webhook()
+    print("✅ Bot konwersacyjny jest gotowy!")
+    bot.infinity_polling()
