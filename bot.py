@@ -1,3 +1,4 @@
+
 import telebot
 import os
 import threading
@@ -5,9 +6,9 @@ import time
 from flask import Flask, render_template, request, jsonify
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
-# Zrobiłem to za Ciebie - token jest wpisany poprawnie w cudzysłowach
+# KONFIGURACJA
 TOKEN = "8779022539:AAEiKsz2R3s-_kh6cQvDCQPrHl1os8dChpw"
-URL_STRONY = "https://xkxkxkxk-5000.euw.devtunnels.ms
+URL_STRONY = "https://bot-production-e8ce.up.railway.app" 
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -53,11 +54,14 @@ def start(message):
     bot.send_message(message.chat.id, "Witaj w systemie! Kliknij przycisk poniżej, aby wypełnić formularz medyczny:", reply_markup=markup)
 
 def run_flask():
-    # Wyciszamy niepotrzebne logi w terminalu
+    # Wyciszamy niepotrzebne logi
     import logging
     log = logging.getLogger('werkzeug')
     log.disabled = True
-    app.run(host='0.0.0.0', port=5000)
+    
+    # Railway dynamicznie przydziela port, jeśli nie ma - używa 5000
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
 
 if __name__ == "__main__":
     print("Uruchamianie serwera...")
@@ -67,5 +71,5 @@ if __name__ == "__main__":
     print("Czyszczenie starych blokad Telegrama...")
     bot.remove_webhook()
     
-    print("✅ Bot jest AKTYWNY! Wejdź na Telegrama i wpisz /start")
+    print("✅ Bot jest AKTYWNY!")
     bot.infinity_polling()
