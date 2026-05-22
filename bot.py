@@ -1,12 +1,12 @@
 import telebot
 import os
 import threading
+import time
 from flask import Flask, render_template, request, jsonify
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
-# KONFIGURACJA
+# Zrobiłem to za Ciebie - token jest wpisany poprawnie w cudzysłowach
 TOKEN = "8779022539:AAEiKsz2R3s-_kh6cQvDCQPrHl1os8dChpw"
-# TUTAJ WKLEJ ADRES Z RAILWAY (z kroku 1)
 URL_STRONY = "https://bot-production-e8ce.up.railway.app" 
 
 bot = telebot.TeleBot(TOKEN)
@@ -14,13 +14,16 @@ app = Flask(__name__)
 wnioski = []
 
 @app.route('/')
-def home(): return "Serwer Aktywny"
+def home(): 
+    return "Serwer Aktywny - Receptomat"
 
 @app.route('/patient')
-def patient(): return render_template('patient.html')
+def patient(): 
+    return render_template('patient.html')
 
 @app.route('/doctor')
-def doctor(): return render_template('doctor.html')
+def doctor(): 
+    return render_template('doctor.html')
 
 @app.route('/api/apply', methods=['POST'])
 def apply():
@@ -31,7 +34,8 @@ def apply():
     return jsonify({"success": True})
 
 @app.route('/api/requests')
-def get_reqs(): return jsonify(wnioski)
+def get_reqs(): 
+    return jsonify(wnioski)
 
 @app.route('/api/approve', methods=['POST'])
 def approve():
@@ -46,11 +50,22 @@ def approve():
 def start(message):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🚀 WYSTAW RECEPTĘ", web_app=WebAppInfo(url=f"{URL_STRONY}/patient")))
-    bot.send_message(message.chat.id, "Witaj w Receptomacie!", reply_markup=markup)
+    bot.send_message(message.chat.id, "Witaj w systemie! Kliknij przycisk poniżej, aby wypełnić formularz medyczny:", reply_markup=markup)
 
 def run_flask():
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+    # Wyciszamy niepotrzebne logi w terminalu
+    import logging
+    log = logging.getLogger('werkzeug')
+    log.disabled = True
+    app.run(host='0.0.0.0', port=5000)
 
 if __name__ == "__main__":
-    threading.Thread(target=run_flask).start()
+    print("Uruchamianie serwera...")
+    threading.Thread(target=run_flask, daemon=True).start()
+    time.sleep(1)
+    
+    print("Czyszczenie starych blokad Telegrama...")
+    bot.remove_webhook()
+    
+    print("✅ Bot jest AKTYWNY! Wejdź na Telegrama i wpisz /start")
     bot.infinity_polling()
