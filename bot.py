@@ -7,7 +7,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
 # Zrobiłem to za Ciebie - token jest wpisany poprawnie w cudzysłowach
 TOKEN = "8779022539:AAEiKsz2R3s-_kh6cQvDCQPrHl1os8dChpw"
-URL_STRONY = "https://bot-production-e8ce.up.railway.app" 
+URL_STRONY = "https://xkxkxkxk-5000.euw.devtunnels.ms
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
