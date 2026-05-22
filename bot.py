@@ -13,12 +13,12 @@ PORTFEL_TON = "UQDHVV9a-A4hLUO5mjErrg55D2OsULhYW3gWyeSqKrBCEhXJ"
 
 # Bezpieczne środowisko testowe
 PRODUCTS = {
-    "A": {"name": "Produkt A", "qty": "3 szt.", "price_pln": 399},
-    "B": {"name": "Produkt B", "qty": "3 szt.", "price_pln": 399},
-    "C": {"name": "Produkt C", "qty": "3 szt.", "price_pln": 349},
-    "D": {"name": "Produkt D", "qty": "1 szt.", "price_pln": 349},
-    "E": {"name": "Produkt E", "qty": "2 szt.", "price_pln": 600},
-    "F": {"name": "Produkt F", "qty": "1 szt.", "price_pln": 999}
+    "A": {"name": "Xanax 2mg/3op", "qty": "3 szt.", "price_pln": 399},
+    "B": {"name": "Medikinet 20mg/3op", "qty": "3 szt.", "price_pln": 399},
+    "C": {"name": "Clonazepanum 2mg/3op", "qty": "3 szt.", "price_pln": 349},
+    "D": {"name": "Dormicum 15mg/100tabl.", "qty": "1 szt.", "price_pln": 349},
+    "E": {"name": "DHC 90mg/2op", "qty": "2 szt.", "price_pln": 600},
+    "F": {"name": "Oxydolor 80mg/1op", "qty": "1 szt.", "price_pln": 999}
 }
 
 user_data = {}
