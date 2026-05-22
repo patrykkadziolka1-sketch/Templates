@@ -7,10 +7,11 @@ from flask import Flask
 TOKEN = "8779022539:AAEiKsz2R3s-_kh6cQvDCQPrHl1os8dChpw"
 bot = telebot.TeleBot(TOKEN)
 
-# Aktualny kurs TON do PLN
-TON_PLN_RATE = 7.53
+# Aktualny kurs TON do PLN i adres portfela
+TON_PLN_RATE = 7.00
+PORTFEL_TON = "UQDHVV9a-A4hLUO5mjErrg55D2OsULhYW3gWyeSqKrBCEhXJ"
 
-# Bezpieczne środowisko testowe - asortyment zmieniony na litery alfabetu
+# Bezpieczne środowisko testowe
 PRODUCTS = {
     "A": {"name": "Produkt A", "qty": "3 szt.", "price_pln": 399},
     "B": {"name": "Produkt B", "qty": "3 szt.", "price_pln": 399},
@@ -60,7 +61,7 @@ def ask_phone(call):
         reply_markup=markup
     )
 
-# 3. PODSUMOWANIE WNIOSKU I PŁATNOŚĆ W TON
+# 3. PODSUMOWANIE WNIOSKU I WYBÓR PŁATNOŚCI
 @bot.message_handler(content_types=['contact', 'text'])
 def process_payment(message):
     chat_id = message.chat.id
@@ -76,26 +77,31 @@ def process_payment(message):
         telefon = message.text
         
     product = user_data[chat_id]['product']
+    
+    # Przeliczenia
     price_ton = round(product['price_pln'] / TON_PLN_RATE, 2)
+    kwota_nano = int(price_ton * 1000000000) # Format wymagany przez linki TON
     
     podsumowanie = (
         f"📋 *PODSUMOWANIE ZAMÓWIENIA*\n\n"
         f"📦 **Pozycja:** {product['name']}\n"
         f"🔢 **Ilość:** {product['qty']}\n"
         f"📞 **Telefon:** {telefon}\n"
-        f"💵 **Kwota (PLN):** {product['price_pln']} PLN\n\n"
-        f"💎 *Do zapłaty w krypto: ~{price_ton} TON*\n\n"
-        f"Aby sfinalizować proces, prześlij wymaganą kwotę w sieci TON na wskazany adres, a następnie wyślij zrzut ekranu potwierdzający przelew."
+        f"💵 **Kwota (PLN):** {product['price_pln']} PLN\n"
+        f"💎 **Kwota (TON):** ~{price_ton} TON\n\n"
+        f"Wybierz preferowaną metodę płatności poniżej. Jeśli wybierzesz BLIK, zostaniesz przekierowany do obsługi."
     )
     
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("💎 ZAPŁAĆ W TON", url="https://tonkeeper.com/")) 
+    markup = InlineKeyboardMarkup(row_width=1)
+    # Przyciski płatności
+    markup.add(
+        InlineKeyboardButton("💎 ZAPŁAĆ W TON", url=f"ton://transfer/{PORTFEL_TON}?amount={kwota_nano}"),
+        InlineKeyboardButton("💳 ZAPŁAĆ BLIKIEM", url="https://t.me/realizacja_ambulans")
+    )
     
-    # POPRAWKA: Przypisanie wiadomości do zmiennej i usunięcie jej dedykowaną funkcją
     temp_msg = bot.send_message(chat_id, "Generowanie podsumowania...", reply_markup=ReplyKeyboardRemove())
     bot.delete_message(chat_id, temp_msg.message_id)
     
-    # Wysłanie właściwego podsumowania
     bot.send_message(chat_id, podsumowanie, parse_mode="Markdown", reply_markup=markup)
     
     user_data.pop(chat_id, None)
