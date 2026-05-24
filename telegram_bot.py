@@ -16,9 +16,9 @@ from telebot.types import (
     ReplyKeyboardRemove,
 )
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TOKEN")
+TOKEN = os.getenv("8779022539:AAEiKsz2R3s-_kh6cQvDCQPrHl1os8dChpw") or os.getenv("TOKEN")
 if not TOKEN:
-    raise RuntimeError("Brakuje TELEGRAM_BOT_TOKEN (lub TOKEN) w zmiennych środowiskowych.")
+    raise RuntimeError("8779022539:AAEiKsz2R3s-_kh6cQvDCQPrHl1os8dChpw")
 
 TON_PLN_RATE = Decimal(os.getenv("TON_PLN_RATE", "7.00"))
 PORTFEL_TON = os.getenv("TON_WALLET", "UQDHVV9a-A4hLUO5mjErrg55D2OsULhYW3gWyeSqKrBCEhXJ")
