@@ -36,14 +36,13 @@ ADMIN_IDS = {
 DB_PATH = os.getenv("BOT_DB_PATH", "bot_data.sqlite3")
 
 PRODUCTS = {
-    "A": {"name": "Xanax 2mg", "qty": "3 szt.", "price_grosze": 39900},
-    "B": {"name": "Medikinet 20mg (IR)", "qty": "3 szt.", "price_grosze": 39900},
-    "C": {"name": "Clonazepanum TZF 2mg", "qty": "3 szt.", "price_grosze": 34900},
-    "D": {"name": "Dormicum 15mg", "qty": "1 szt.", "price_grosze": 34900},
-    "E": {"name": "DHC Continus 90mg", "qty": "2 szt.", "price_grosze": 60000},
-    "F": {"name": "Oxydolor 80mg", "qty": "1 szt.", "price_grosze": 99900},
+    "A": {"name": "Produkt A", "qty": "3 szt.", "price_grosze": 39900},
+    "B": {"name": "Produkt B", "qty": "3 szt.", "price_grosze": 39900},
+    "C": {"name": "Produkt C", "qty": "3 szt.", "price_grosze": 34900},
+    "D": {"name": "Produkt D", "qty": "1 szt.", "price_grosze": 34900},
+    "E": {"name": "Produkt E", "qty": "2 szt.", "price_grosze": 60000},
+    "F": {"name": "Produkt F", "qty": "1 szt.", "price_grosze": 99900},
 }
-
 
 QUICK_TOPUP_AMOUNTS = [5000, 10000, 20000, 50000]  # w groszach
 PHONE_RE = re.compile(r"^\+?[0-9\s\-()]{7,20}$")
