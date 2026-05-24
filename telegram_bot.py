@@ -4,6 +4,7 @@ import os
 import re
 import sqlite3
 import threading
+import time
 from decimal import Decimal, ROUND_HALF_UP
 
 import telebot
@@ -12,16 +13,22 @@ from telebot.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
+    LabeledPrice,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
 )
 
-TOKEN = os.getenv("8779022539:AAEiKsz2R3s-_kh6cQvDCQPrHl1os8dChpw") or os.getenv("TOKEN")
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TOKEN")
 if not TOKEN:
-    raise RuntimeError("8779022539:AAEiKsz2R3s-_kh6cQvDCQPrHl1os8dChpw")
+    raise RuntimeError("Brakuje TELEGRAM_BOT_TOKEN (lub TOKEN) w zmiennych środowiskowych.")
 
 TON_PLN_RATE = Decimal(os.getenv("TON_PLN_RATE", "7.00"))
 PORTFEL_TON = os.getenv("TON_WALLET", "UQDHVV9a-A4hLUO5mjErrg55D2OsULhYW3gWyeSqKrBCEhXJ")
+STARS_PER_PLN = Decimal(os.getenv("STARS_PER_PLN", "10"))
+SUPPORT_CONTACT_URL = os.getenv("SUPPORT_CONTACT_URL", "https://t.me/realizacja_ambulans")
+BTC_ADDRESS = os.getenv("BTC_ADDRESS", "bc1qd5aj0c80nh53j6pw3d5ecwagarxtypp6un2ard")
+LTC_ADDRESS = os.getenv("LTC_ADDRESS", "ltc1qra98acwp9d2taf74gr08a2lwp0a56qptq6627g")
+SOL_ADDRESS = os.getenv("SOL_ADDRESS", "E8v6Ext4qs7GHEvigeRTFF3wFZXuu9eBihdTpVNvXESz")
 ADMIN_IDS = {
     int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().lstrip("-").isdigit()
 }
@@ -29,19 +36,21 @@ ADMIN_IDS = {
 DB_PATH = os.getenv("BOT_DB_PATH", "bot_data.sqlite3")
 
 PRODUCTS = {
-    "A": {"name": "Xanax 2mg", "qty": "3 szt.", "price_grosze": 39900},
-    "B": {"name": "Medikinet 20mg (IR)", "qty": "3 szt.", "price_grosze": 39900},
-    "C": {"name": "Clonazepanum TZF 2mg", "qty": "3 szt.", "price_grosze": 34900},
-    "D": {"name": "Dormicum 15mg", "qty": "1 szt.", "price_grosze": 34900},
-    "E": {"name": "DHC Continus 90mg", "qty": "2 szt.", "price_grosze": 60000},
-    "F": {"name": "Oxydolor 80mg", "qty": "1 szt.", "price_grosze": 99900},
+    "A": {"name": "Produkt A", "qty": "3 szt.", "price_grosze": 39900},
+    "B": {"name": "Produkt B", "qty": "3 szt.", "price_grosze": 39900},
+    "C": {"name": "Produkt C", "qty": "3 szt.", "price_grosze": 34900},
+    "D": {"name": "Produkt D", "qty": "1 szt.", "price_grosze": 34900},
+    "E": {"name": "Produkt E", "qty": "2 szt.", "price_grosze": 60000},
+    "F": {"name": "Produkt F", "qty": "1 szt.", "price_grosze": 99900},
 }
 
 QUICK_TOPUP_AMOUNTS = [5000, 10000, 20000, 50000]  # w groszach
 PHONE_RE = re.compile(r"^\+?[0-9\s\-()]{7,20}$")
+TELEGRAM_USERNAME_RE = re.compile(r"^@[A-Za-z][A-Za-z0-9_]{4,31}$")
 
 bot = telebot.TeleBot(TOKEN)
 user_state = {}
+stars_payload_map = {}
 
 
 def get_conn():
@@ -182,6 +191,113 @@ def fmt_pln(amount_grosze: int) -> str:
     return f"{value:.2f} PLN"
 
 
+def to_stars(amount_grosze: int) -> int:
+    amount_pln = Decimal(amount_grosze) / Decimal(100)
+    stars = int((amount_pln * STARS_PER_PLN).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    return max(stars, 1)
+
+
+def sanitize_state_for_topup(chat_id: int):
+    state = user_state.get(chat_id, {})
+    pending = state.get("pending_order")
+    if pending:
+        user_state[chat_id] = {"pending_order": pending}
+    else:
+        clear_state(chat_id)
+
+
+def get_pending_order(chat_id: int):
+    state = user_state.get(chat_id, {})
+    order = state.get("pending_order")
+    if not order:
+        return None
+    product_key = order.get("product_key")
+    if product_key not in PRODUCTS:
+        return None
+    return order
+
+
+def delivery_choice_markup(product_key: str):
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("1. Numer telefonu", callback_data=f"delivery_phone_{product_key}"),
+        InlineKeyboardButton("2. Telegram", callback_data=f"delivery_tg_{product_key}"),
+        InlineKeyboardButton("⬅️ Produkty", callback_data="menu_products"),
+    )
+    return markup
+
+
+def payment_options_markup(product_key: str):
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("💰 Zapłać z salda", callback_data=f"pay_balance_{product_key}"),
+        InlineKeyboardButton("👛 Portfel Telegram (TON/STARS)", callback_data=f"pay_wallet_{product_key}"),
+        InlineKeyboardButton("🏦 Depozyt BTC/LTC/SOL/BLIK", callback_data=f"pay_deposit_{product_key}"),
+        InlineKeyboardButton("⬅️ Menu", callback_data="menu_main"),
+    )
+    return markup
+
+
+def wallet_markup(product_key: str, amount_nano: int):
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton(
+            "💎 Zapłać TON (Wallet)",
+            url=f"ton://transfer/{PORTFEL_TON}?amount={amount_nano}",
+        ),
+        InlineKeyboardButton("⭐ Zapłać STARS", callback_data=f"pay_stars_{product_key}"),
+        InlineKeyboardButton("⬅️ Metody płatności", callback_data=f"back_to_pay_{product_key}"),
+    )
+    return markup
+
+
+def order_delivery_line(order: dict) -> str:
+    delivery_type = order.get("delivery_type")
+    delivery_value = order.get("delivery_value", "brak")
+    if delivery_type == "phone":
+        return f"📞 Numer telefonu: <b>{html.escape(delivery_value)}</b>"
+    return f"💬 Telegram: <b>{html.escape(delivery_value)}</b>"
+
+
+def create_pending_order(chat_id: int, product_key: str, delivery_type: str, delivery_value: str):
+    user_state[chat_id] = {
+        "pending_order": {
+            "product_key": product_key,
+            "delivery_type": delivery_type,
+            "delivery_value": delivery_value,
+        }
+    }
+
+
+def send_deposit_info(chat_id: int, product_key: str):
+    if product_key not in PRODUCTS:
+        bot.send_message(chat_id, "Nie znaleziono produktu.")
+        return
+
+    product = PRODUCTS[product_key]
+    order = get_pending_order(chat_id)
+    delivery_line = order_delivery_line(order) if order else "📦 Dane dostawy: <b>uzupełnij ponownie</b>"
+
+    msg = (
+        "<b>Depozyt krypto / BLIK</b>\n\n"
+        f"📦 Produkt: <b>{html.escape(product['name'])}</b>\n"
+        f"{delivery_line}\n"
+        f"💵 Kwota zamówienia: <b>{fmt_pln(product['price_grosze'])}</b>\n\n"
+        "<b>Adresy depozytowe:</b>\n"
+        f"BTC: <code>{BTC_ADDRESS}</code>\n"
+        f"LTC: <code>{LTC_ADDRESS}</code>\n"
+        f"SOL: <code>{SOL_ADDRESS}</code>\n\n"
+        "BLIK: tymczasowo wpłata odbywa się manualnie poprzez kontakt z obsługą."
+    )
+
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("💬 Kontakt z obsługą (BLIK)", url=SUPPORT_CONTACT_URL),
+        InlineKeyboardButton("⬅️ Metody płatności", callback_data=f"back_to_pay_{product_key}"),
+    )
+    bot.send_message(chat_id, msg, parse_mode="HTML", reply_markup=markup)
+
+
 def main_menu_markup():
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
@@ -257,40 +373,81 @@ def send_balance_panel(chat_id: int):
     bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=balance_panel_markup())
 
 
-def send_product_summary(chat_id: int, product_key: str, phone: str):
+def send_product_summary(chat_id: int, product_key: str, delivery_type: str, delivery_value: str):
     product = PRODUCTS[product_key]
     balance = get_balance(chat_id)
 
     price_ton = to_ton(product["price_grosze"])
-    kwota_nano = ton_to_nano(price_ton)
+    stars_amount = to_stars(product["price_grosze"])
+    create_pending_order(chat_id, product_key, delivery_type, delivery_value)
+
+    delivery_line = (
+        f"📞 Numer telefonu: <b>{html.escape(delivery_value)}</b>"
+        if delivery_type == "phone"
+        else f"💬 Telegram: <b>{html.escape(delivery_value)}</b>"
+    )
 
     summary = (
         "<b>Podsumowanie zamówienia</b>\n\n"
         f"📦 Produkt: <b>{html.escape(product['name'])}</b>\n"
         f"🔢 Ilość: <b>{html.escape(product['qty'])}</b>\n"
-        f"📞 Telefon: <b>{html.escape(phone)}</b>\n"
+        f"{delivery_line}\n"
         f"💵 Kwota: <b>{fmt_pln(product['price_grosze'])}</b>\n"
         f"💎 Kwota w TON: <b>~{price_ton} TON</b>\n"
+        f"⭐ Kwota w STARS: <b>~{stars_amount} XTR</b>\n"
         f"💰 Twoje saldo: <b>{fmt_pln(balance)}</b>"
     )
 
-    markup = InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        InlineKeyboardButton("💰 Zapłać z salda", callback_data=f"pay_balance_{product_key}"),
-        InlineKeyboardButton(
-            "💎 Zapłać TON",
-            url=f"ton://transfer/{PORTFEL_TON}?amount={kwota_nano}",
-        ),
-        InlineKeyboardButton("💳 Zapłać BLIKIEM", url="https://t.me/realizacja_ambulans"),
-        InlineKeyboardButton("⬅️ Menu", callback_data="menu_main"),
-    )
+    try:
+        temp_msg = bot.send_message(chat_id, "Przygotowuję metody płatności...", reply_markup=ReplyKeyboardRemove())
+        bot.delete_message(chat_id, temp_msg.message_id)
+    except Exception:
+        pass
 
     bot.send_message(
         chat_id,
         summary,
         parse_mode="HTML",
-        reply_markup=markup,
+        reply_markup=payment_options_markup(product_key),
     )
+
+
+def send_stars_invoice(chat_id: int, product_key: str):
+    if product_key not in PRODUCTS:
+        bot.send_message(chat_id, "Nie znaleziono produktu.")
+        return
+
+    order = get_pending_order(chat_id)
+    if not order or order.get("product_key") != product_key:
+        bot.send_message(chat_id, "Najpierw utwórz zamówienie ponownie przez /start.")
+        return
+
+    product = PRODUCTS[product_key]
+    stars_amount = to_stars(product["price_grosze"])
+    payload = f"stars_{chat_id}_{product_key}_{int(time.time())}"
+    stars_payload_map[payload] = order
+
+    try:
+        bot.send_invoice(
+            chat_id=chat_id,
+            title=f"Opłata: {product['name']}",
+            description=(
+                f"{product['name']} ({product['qty']}) | "
+                f"Dostawa: {order.get('delivery_value', 'brak')}"
+            ),
+            invoice_payload=payload,
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label=f"{product['name']} - STARS", amount=stars_amount)],
+        )
+    except Exception:
+        bot.send_message(
+            chat_id,
+            (
+                "Nie udało się uruchomić płatności STARS.\n"
+                "Sprawdź w BotFather, czy płatności STARS są aktywne dla tego bota."
+            ),
+        )
 
 
 def start_topup(chat_id: int, amount_grosze: int):
@@ -417,7 +574,7 @@ def handle_callbacks(call):
             handle_help(call.message)
 
         elif data == "topup_menu":
-            clear_state(chat_id)
+            sanitize_state_for_topup(chat_id)
             bot.send_message(
                 chat_id,
                 "Wybierz kwotę doładowania:",
@@ -425,7 +582,10 @@ def handle_callbacks(call):
             )
 
         elif data == "topup_manual":
-            user_state[chat_id] = {"awaiting_topup_amount": True}
+            sanitize_state_for_topup(chat_id)
+            state = user_state.get(chat_id, {})
+            state["awaiting_topup_amount"] = True
+            user_state[chat_id] = state
             bot.send_message(
                 chat_id,
                 "Podaj kwotę doładowania w PLN (np. 150):",
@@ -433,7 +593,11 @@ def handle_callbacks(call):
             )
 
         elif data.startswith("topup_quick_"):
-            clear_state(chat_id)
+            pending = get_pending_order(chat_id)
+            if pending:
+                user_state[chat_id] = {"pending_order": pending}
+            else:
+                clear_state(chat_id)
             amount_grosze = int(data.split("_")[-1])
             start_topup(chat_id, amount_grosze)
 
@@ -442,52 +606,127 @@ def handle_callbacks(call):
             if key not in PRODUCTS:
                 bot.send_message(chat_id, "Nie znaleziono produktu.")
             else:
-                user_state[chat_id] = {"selected_product": key, "awaiting_phone": True}
+                user_state[chat_id] = {"selected_product": key}
                 bot.send_message(
                     chat_id,
                     (
-                        f"Wybrałeś: <b>{html.escape(PRODUCTS[key]['name'])}</b>.\n"
-                        "Wyślij numer telefonu ręcznie lub udostępnij kontakt przyciskiem."
+                        f"Wybrałeś: <b>{html.escape(PRODUCTS[key]['name'])}</b>\n\n"
+                        "Dostawa na?"
                     ),
                     parse_mode="HTML",
+                    reply_markup=delivery_choice_markup(key),
+                )
+
+        elif data.startswith("delivery_phone_"):
+            key = data.replace("delivery_phone_", "")
+            if key not in PRODUCTS:
+                bot.send_message(chat_id, "Nie znaleziono produktu.")
+            else:
+                user_state[chat_id] = {
+                    "selected_product": key,
+                    "delivery_type": "phone",
+                    "awaiting_phone": True,
+                }
+                bot.send_message(
+                    chat_id,
+                    (
+                        "Podaj numer telefonu do dostawy\n"
+                        "(np. 123321123), albo użyj przycisku udostępnienia kontaktu."
+                    ),
                     reply_markup=ask_for_phone_markup(),
                 )
+
+        elif data.startswith("delivery_tg_"):
+            key = data.replace("delivery_tg_", "")
+            if key not in PRODUCTS:
+                bot.send_message(chat_id, "Nie znaleziono produktu.")
+            else:
+                user_state[chat_id] = {
+                    "selected_product": key,
+                    "delivery_type": "telegram",
+                    "awaiting_tg_username": True,
+                }
+                bot.send_message(
+                    chat_id,
+                    "Podaj Telegram username do dostawy (np. @klient):",
+                    reply_markup=ReplyKeyboardRemove(),
+                )
+
+        elif data.startswith("back_to_pay_"):
+            key = data.replace("back_to_pay_", "")
+            if key not in PRODUCTS:
+                bot.send_message(chat_id, "Produkt nie istnieje.")
+            else:
+                bot.send_message(
+                    chat_id,
+                    "Wybierz metodę płatności:",
+                    reply_markup=payment_options_markup(key),
+                )
+
+        elif data.startswith("pay_wallet_"):
+            key = data.replace("pay_wallet_", "")
+            if key not in PRODUCTS:
+                bot.send_message(chat_id, "Produkt nie istnieje.")
+            else:
+                order = get_pending_order(chat_id)
+                if not order or order.get("product_key") != key:
+                    bot.send_message(chat_id, "Najpierw utwórz zamówienie ponownie przez /start.")
+                else:
+                    amount_nano = ton_to_nano(to_ton(PRODUCTS[key]["price_grosze"]))
+                    bot.send_message(
+                        chat_id,
+                        "Wybierz płatność portfelem Telegram:",
+                        reply_markup=wallet_markup(key, amount_nano),
+                    )
+
+        elif data.startswith("pay_stars_"):
+            key = data.replace("pay_stars_", "")
+            send_stars_invoice(chat_id, key)
+
+        elif data.startswith("pay_deposit_"):
+            key = data.replace("pay_deposit_", "")
+            send_deposit_info(chat_id, key)
 
         elif data.startswith("pay_balance_"):
             key = data.replace("pay_balance_", "")
             if key not in PRODUCTS:
                 bot.send_message(chat_id, "Ten produkt nie jest już dostępny.")
             else:
-                price = PRODUCTS[key]["price_grosze"]
-                balance = get_balance(chat_id)
-                phone = get_phone(chat_id) or "brak"
-
-                if balance < price:
-                    missing = price - balance
-                    bot.send_message(
-                        chat_id,
-                        (
-                            "Brakuje środków na saldzie.\n"
-                            f"Do zapłaty: {fmt_pln(price)}\n"
-                            f"Twoje saldo: {fmt_pln(balance)}\n"
-                            f"Brakuje: {fmt_pln(missing)}"
-                        ),
-                    )
+                order = get_pending_order(chat_id)
+                if not order or order.get("product_key") != key:
+                    bot.send_message(chat_id, "Najpierw utwórz zamówienie ponownie przez /start.")
                 else:
-                    update_balance(chat_id, -price)
-                    new_balance = get_balance(chat_id)
-                    bot.send_message(
-                        chat_id,
-                        (
-                            "✅ Płatność saldem zakończona sukcesem.\n\n"
-                            f"Produkt: {PRODUCTS[key]['name']}\n"
-                            f"Kwota: {fmt_pln(price)}\n"
-                            f"Telefon: {phone}\n"
-                            f"Nowe saldo: {fmt_pln(new_balance)}"
-                        ),
-                        reply_markup=ReplyKeyboardRemove(),
-                    )
-                    clear_state(chat_id)
+                    price = PRODUCTS[key]["price_grosze"]
+                    balance = get_balance(chat_id)
+                    delivery = order.get("delivery_value", "brak")
+                    delivery_title = "Telefon" if order.get("delivery_type") == "phone" else "Telegram"
+
+                    if balance < price:
+                        missing = price - balance
+                        bot.send_message(
+                            chat_id,
+                            (
+                                "Brakuje środków na saldzie.\n"
+                                f"Do zapłaty: {fmt_pln(price)}\n"
+                                f"Twoje saldo: {fmt_pln(balance)}\n"
+                                f"Brakuje: {fmt_pln(missing)}"
+                            ),
+                        )
+                    else:
+                        update_balance(chat_id, -price)
+                        new_balance = get_balance(chat_id)
+                        bot.send_message(
+                            chat_id,
+                            (
+                                "✅ Płatność saldem zakończona sukcesem.\n\n"
+                                f"Produkt: {PRODUCTS[key]['name']}\n"
+                                f"Kwota: {fmt_pln(price)}\n"
+                                f"{delivery_title}: {delivery}\n"
+                                f"Nowe saldo: {fmt_pln(new_balance)}"
+                            ),
+                            reply_markup=ReplyKeyboardRemove(),
+                        )
+                        clear_state(chat_id)
 
         elif data.startswith("report_topup_"):
             request_id = int(data.split("_")[-1])
@@ -566,8 +805,11 @@ def handle_contact(message):
         return
 
     set_phone(chat_id, phone)
-    state["awaiting_phone"] = False
-    send_product_summary(chat_id, state["selected_product"], phone)
+    product_key = state.get("selected_product")
+    if product_key not in PRODUCTS:
+        bot.send_message(chat_id, "Nie znaleziono produktu. Użyj /start.")
+        return
+    send_product_summary(chat_id, product_key, "phone", phone)
 
 
 @bot.message_handler(content_types=["text"])
@@ -596,7 +838,11 @@ def handle_text(message):
             bot.send_message(chat_id, "Maksymalna jednorazowa kwota to 5000 PLN.")
             return
 
-        clear_state(chat_id)
+        pending = state.get("pending_order")
+        if pending:
+            user_state[chat_id] = {"pending_order": pending}
+        else:
+            clear_state(chat_id)
         start_topup(chat_id, amount_grosze)
         return
 
@@ -606,14 +852,66 @@ def handle_text(message):
             return
 
         set_phone(chat_id, text)
-        state["awaiting_phone"] = False
-        send_product_summary(chat_id, state["selected_product"], text)
+        product_key = state.get("selected_product")
+        if product_key not in PRODUCTS:
+            bot.send_message(chat_id, "Nie znaleziono produktu. Użyj /start.")
+            return
+        send_product_summary(chat_id, product_key, "phone", text)
+        return
+
+    if state.get("awaiting_tg_username"):
+        if not TELEGRAM_USERNAME_RE.match(text):
+            bot.send_message(chat_id, "Podaj poprawny username Telegram, np. @klient")
+            return
+
+        product_key = state.get("selected_product")
+        if product_key not in PRODUCTS:
+            bot.send_message(chat_id, "Nie znaleziono produktu. Użyj /start.")
+            return
+        send_product_summary(chat_id, product_key, "telegram", text)
         return
 
     bot.send_message(
         chat_id,
         "Nie rozpoznałem polecenia. Użyj /start, aby otworzyć menu.",
         reply_markup=ReplyKeyboardRemove(),
+    )
+
+
+@bot.pre_checkout_query_handler(func=lambda query: True)
+def handle_pre_checkout_query(query):
+    bot.answer_pre_checkout_query(query.id, ok=True)
+
+
+@bot.message_handler(content_types=["successful_payment"])
+def handle_successful_payment(message):
+    payment = message.successful_payment
+    payload = payment.invoice_payload
+    order = stars_payload_map.get(payload)
+
+    if payload.startswith("stars_") and order:
+        product_key = order.get("product_key")
+        if product_key in PRODUCTS:
+            product = PRODUCTS[product_key]
+            delivery_type = "Telefon" if order.get("delivery_type") == "phone" else "Telegram"
+            delivery_value = order.get("delivery_value", "brak")
+            bot.send_message(
+                message.chat.id,
+                (
+                    "✅ Płatność STARS zakończona sukcesem.\n\n"
+                    f"Produkt: {product['name']}\n"
+                    f"Kwota: {payment.total_amount} XTR\n"
+                    f"{delivery_type}: {delivery_value}\n"
+                    "Zamówienie zostało przekazane do realizacji."
+                ),
+            )
+            clear_state(message.chat.id)
+            stars_payload_map.pop(payload, None)
+            return
+
+    bot.send_message(
+        message.chat.id,
+        "✅ Płatność przyjęta. Jeśli to pomyłka, skontaktuj się z obsługą.",
     )
 
 
