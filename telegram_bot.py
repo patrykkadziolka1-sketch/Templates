@@ -48,13 +48,13 @@ ADMIN_IDS = {
 DB_PATH = os.getenv("BOT_DB_PATH", "bot_data.sqlite3")
 
 PRODUCTS = {
-    "A": {"name": "XANAX 2MG", "qty": "3 szt.", "price_grosze": 39900},
-    "B": {"name": "MEDIKINET 20MG ", "qty": "3 szt.", "price_grosze": 39900},
-    "C": {"name": "CLONAZEPANUM TZF 2MG", "qty": "3 szt.", "price_grosze": 34900},
-    "D": {"name": "DORMICUM 15MG (1OOTABL.)", "qty": "1 szt.", "price_grosze": 34900},
-    "E": {"name": "DHC 90MG", "qty": "2 szt.", "price_grosze": 60000},
-    "F": {"name": "OXYCONTIN 40MG", "qty": "1 szt.", "price_grosze": 60000},
-    "G": {"name": "OXYCONTIN 40MG", "qty": "2 szt.", "price_grosze": 99900},
+    "A": {"name": "XANAX 2MG", "qty": "3op.", "price_grosze": 39900},
+    "B": {"name": "MEDIKINET 20MG ", "qty": "3op.", "price_grosze": 39900},
+    "C": {"name": "CLONAZEPAM 2MG", "qty": "3op.", "price_grosze": 34900},
+    "D": {"name": "DORMICUM 15MG", "qty": "1op.", "price_grosze": 34900},
+    "E": {"name": "DHC 90MG", "qty": "2op.", "price_grosze": 60000},
+    "F": {"name": "OXYCONTIN 40MG", "qty": "1op", "price_grosze": 60000},
+    "G": {"name": "OXYCONTIN 40MG", "qty": "2op.", "price_grosze": 99900},
 }
 
 QUICK_TOPUP_AMOUNTS = [5000, 10000, 20000, 50000]  # w groszach
