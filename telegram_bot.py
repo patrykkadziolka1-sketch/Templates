@@ -18,9 +18,21 @@ from telebot.types import (
     ReplyKeyboardRemove,
 )
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TOKEN")
-if not TOKEN:
-    raise RuntimeError("Brakuje TELEGRAM_BOT_TOKEN (lub TOKEN) w zmiennych środowiskowych.")
+def read_token() -> str:
+    raw = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TOKEN") or ""
+    token = raw.strip().strip('"').strip("'")
+
+    if not token:
+        raise RuntimeError("Brakuje TELEGRAM_BOT_TOKEN (lub TOKEN) w zmiennych środowiskowych.")
+    if ":" not in token:
+        raise RuntimeError(
+            "Niepoprawny token Telegram: musi zawierać dwukropek, np. 123456789:AA.... "
+            "Sprawdź zmienną TELEGRAM_BOT_TOKEN w Railway."
+        )
+    return token
+
+
+TOKEN = read_token()
 
 TON_PLN_RATE = Decimal(os.getenv("TON_PLN_RATE", "7.00"))
 PORTFEL_TON = os.getenv("TON_WALLET", "UQDHVV9a-A4hLUO5mjErrg55D2OsULhYW3gWyeSqKrBCEhXJ")
@@ -36,12 +48,12 @@ ADMIN_IDS = {
 DB_PATH = os.getenv("BOT_DB_PATH", "bot_data.sqlite3")
 
 PRODUCTS = {
-    "A": {"name": "XANAX 2MG", "qty": "3 szt.", "price_grosze": 39900},
-    "B": {"name": "MEDIKINET 20MG", "qty": "3 szt.", "price_grosze": 39900},
-    "C": {"name": "CLONAZEPANUM TZF 2MG", "qty": "3 szt.", "price_grosze": 34900},
-    "D": {"name": "DORMICUM 15MG", "qty": "1 szt.", "price_grosze": 34900},
-    "E": {"name": "DHC 90MG", "qty": "2 szt.", "price_grosze": 60000},
-    "F": {"name": "OXYDOLOR 80MG", "qty": "1 szt.", "price_grosze": 99900},
+    "A": {"name": "Produkt A", "qty": "3 szt.", "price_grosze": 39900},
+    "B": {"name": "Produkt B", "qty": "3 szt.", "price_grosze": 39900},
+    "C": {"name": "Produkt C", "qty": "3 szt.", "price_grosze": 34900},
+    "D": {"name": "Produkt D", "qty": "1 szt.", "price_grosze": 34900},
+    "E": {"name": "Produkt E", "qty": "2 szt.", "price_grosze": 60000},
+    "F": {"name": "Produkt F", "qty": "1 szt.", "price_grosze": 99900},
 }
 
 QUICK_TOPUP_AMOUNTS = [5000, 10000, 20000, 50000]  # w groszach
