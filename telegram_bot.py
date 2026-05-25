@@ -63,6 +63,7 @@ TELEGRAM_USERNAME_RE = re.compile(r"^@[A-Za-z][A-Za-z0-9_]{4,31}$")
 bot = telebot.TeleBot(TOKEN)
 user_state = {}
 stars_payload_map = {}
+topup_stars_payload_map = {}
 
 
 def get_conn():
@@ -259,6 +260,41 @@ def wallet_markup(product_key: str, amount_nano: int):
         ),
         InlineKeyboardButton("⭐ Zapłać STARS", callback_data=f"pay_stars_{product_key}"),
         InlineKeyboardButton("⬅️ Metody płatności", callback_data=f"back_to_pay_{product_key}"),
+    )
+    return markup
+
+
+def topup_methods_markup(request_id: int):
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("👛 Portfel Telegram (TON/STARS)", callback_data=f"topup_wallet_{request_id}"),
+        InlineKeyboardButton("🏦 Depozyt BTC/LTC/SOL/BLIK", callback_data=f"topup_deposit_{request_id}"),
+        InlineKeyboardButton("✅ Opłaciłem", callback_data=f"report_topup_{request_id}"),
+        InlineKeyboardButton("⬅️ Panel salda", callback_data="menu_balance"),
+    )
+    return markup
+
+
+def topup_wallet_markup(request_id: int, amount_nano: int):
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton(
+            "💎 Opłać TON (Wallet)",
+            url=f"ton://transfer/{PORTFEL_TON}?amount={amount_nano}&text=TOPUP_ID_{request_id}",
+        ),
+        InlineKeyboardButton("⭐ Opłać STARS", callback_data=f"topup_stars_{request_id}"),
+        InlineKeyboardButton("✅ Opłaciłem", callback_data=f"report_topup_{request_id}"),
+        InlineKeyboardButton("⬅️ Metody doładowania", callback_data=f"topup_methods_{request_id}"),
+    )
+    return markup
+
+
+def topup_deposit_markup(request_id: int):
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("💬 Kontakt z obsługą (BLIK)", url=SUPPORT_CONTACT_URL),
+        InlineKeyboardButton("✅ Opłaciłem", callback_data=f"report_topup_{request_id}"),
+        InlineKeyboardButton("⬅️ Metody doładowania", callback_data=f"topup_methods_{request_id}"),
     )
     return markup
 
@@ -462,38 +498,135 @@ def send_stars_invoice(chat_id: int, product_key: str):
         )
 
 
+def get_topup_request_for_user(chat_id: int, request_id: int):
+    req = get_topup_request(request_id)
+    if not req:
+        bot.send_message(chat_id, "Nie znaleziono takiego doładowania.")
+        return None
+    if req["chat_id"] != chat_id:
+        bot.send_message(chat_id, "To doładowanie nie należy do Ciebie.")
+        return None
+    return req
+
+
+def send_topup_methods(chat_id: int, request_data: dict):
+    amount_grosze = request_data["amount_grosze"]
+    request_id = request_data["id"]
+    status = request_data["status"]
+    amount_ton = to_ton(amount_grosze)
+    stars_amount = to_stars(amount_grosze)
+
+    status_map = {
+        "created": "utworzone",
+        "reported": "oczekuje na weryfikację",
+        "approved": "zatwierdzone",
+        "rejected": "odrzucone",
+    }
+    status_label = status_map.get(status, status)
+
+    text = (
+        "<b>Doładowanie salda</b>\n\n"
+        f"Kwota: <b>{fmt_pln(amount_grosze)}</b>\n"
+        f"💎 TON: <b>~{amount_ton} TON</b>\n"
+        f"⭐ STARS: <b>~{stars_amount} XTR</b>\n"
+        f"ID doładowania: <code>{request_id}</code>\n"
+        f"Status: <b>{status_label}</b>\n\n"
+        "Wybierz metodę płatności."
+    )
+
+    if status in {"approved", "rejected"}:
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("⬅️ Panel salda", callback_data="menu_balance"))
+    else:
+        markup = topup_methods_markup(request_id)
+
+    bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
+
+
+def send_topup_wallet_info(chat_id: int, request_data: dict):
+    request_id = request_data["id"]
+    amount_grosze = request_data["amount_grosze"]
+    amount_ton = to_ton(amount_grosze)
+    stars_amount = to_stars(amount_grosze)
+    amount_nano = ton_to_nano(amount_ton)
+
+    text = (
+        "<b>Portfel Telegram (doładowanie)</b>\n\n"
+        f"Kwota: <b>{fmt_pln(amount_grosze)}</b>\n"
+        f"💎 TON: <b>~{amount_ton} TON</b>\n"
+        f"⭐ STARS: <b>~{stars_amount} XTR</b>\n"
+        f"ID doładowania: <code>{request_id}</code>\n\n"
+        "TON: po wpłacie kliknij 'Opłaciłem'.\n"
+        "STARS: saldo zostanie dopisane automatycznie po udanej płatności."
+    )
+    bot.send_message(
+        chat_id,
+        text,
+        parse_mode="HTML",
+        reply_markup=topup_wallet_markup(request_id, amount_nano),
+    )
+
+
+def send_topup_deposit_info(chat_id: int, request_data: dict):
+    request_id = request_data["id"]
+    amount_grosze = request_data["amount_grosze"]
+
+    text = (
+        "<b>Depozyt krypto / BLIK (doładowanie)</b>\n\n"
+        f"Kwota doładowania: <b>{fmt_pln(amount_grosze)}</b>\n"
+        f"ID doładowania: <code>{request_id}</code>\n\n"
+        "<b>Adresy depozytowe:</b>\n"
+        f"BTC: <code>{BTC_ADDRESS}</code>\n"
+        f"LTC: <code>{LTC_ADDRESS}</code>\n"
+        f"SOL: <code>{SOL_ADDRESS}</code>\n\n"
+        "BLIK: tymczasowo wpłata odbywa się manualnie przez kontakt z obsługą.\n"
+        "Po wpłacie kliknij 'Opłaciłem'."
+    )
+    bot.send_message(
+        chat_id,
+        text,
+        parse_mode="HTML",
+        reply_markup=topup_deposit_markup(request_id),
+    )
+
+
+def send_topup_stars_invoice(chat_id: int, request_data: dict):
+    request_id = request_data["id"]
+    amount_grosze = request_data["amount_grosze"]
+    stars_amount = to_stars(amount_grosze)
+    payload = f"topup_stars_{chat_id}_{request_id}_{int(time.time())}"
+    topup_stars_payload_map[payload] = request_id
+
+    try:
+        bot.send_invoice(
+            chat_id=chat_id,
+            title="Doładowanie salda",
+            description=f"Doładowanie salda ID {request_id} na kwotę {fmt_pln(amount_grosze)}",
+            invoice_payload=payload,
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label="Doładowanie salda - STARS", amount=stars_amount)],
+        )
+    except Exception:
+        bot.send_message(
+            chat_id,
+            (
+                "Nie udało się uruchomić płatności STARS.\n"
+                "Sprawdź w BotFather, czy płatności STARS są aktywne dla bota."
+            ),
+        )
+
+
 def start_topup(chat_id: int, amount_grosze: int):
     if amount_grosze < 100:
         bot.send_message(chat_id, "Minimalna kwota doładowania to 1 PLN.")
         return
 
     amount_ton = to_ton(amount_grosze)
-    amount_nano = ton_to_nano(amount_ton)
     request_id = create_topup_request(chat_id, amount_grosze, amount_ton)
-
-    text = (
-        "<b>Doładowanie salda</b>\n\n"
-        f"Kwota: <b>{fmt_pln(amount_grosze)}</b>\n"
-        f"Do zapłaty: <b>~{amount_ton} TON</b>\n"
-        f"ID doładowania: <code>{request_id}</code>\n\n"
-        "1) Opłać doładowanie przyciskiem TON.\n"
-        "2) Kliknij 'Opłaciłem', aby wysłać zgłoszenie do weryfikacji."
-    )
-
-    markup = InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        InlineKeyboardButton(
-            "💎 Opłać w TON",
-            url=(
-                f"ton://transfer/{PORTFEL_TON}?amount={amount_nano}"
-                f"&text=TOPUP_{chat_id}_{request_id}"
-            ),
-        ),
-        InlineKeyboardButton("✅ Opłaciłem", callback_data=f"report_topup_{request_id}"),
-        InlineKeyboardButton("⬅️ Panel salda", callback_data="menu_balance"),
-    )
-
-    bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
+    req = get_topup_request(request_id)
+    if req:
+        send_topup_methods(chat_id, req)
 
 
 def notify_admins_about_topup(request_data: dict):
@@ -612,6 +745,39 @@ def handle_callbacks(call):
                 clear_state(chat_id)
             amount_grosze = int(data.split("_")[-1])
             start_topup(chat_id, amount_grosze)
+
+        elif data.startswith("topup_methods_"):
+            request_id = int(data.split("_")[-1])
+            req = get_topup_request_for_user(chat_id, request_id)
+            if req:
+                send_topup_methods(chat_id, req)
+
+        elif data.startswith("topup_wallet_"):
+            request_id = int(data.split("_")[-1])
+            req = get_topup_request_for_user(chat_id, request_id)
+            if req:
+                if req["status"] in {"approved", "rejected"}:
+                    send_topup_methods(chat_id, req)
+                else:
+                    send_topup_wallet_info(chat_id, req)
+
+        elif data.startswith("topup_deposit_"):
+            request_id = int(data.split("_")[-1])
+            req = get_topup_request_for_user(chat_id, request_id)
+            if req:
+                if req["status"] in {"approved", "rejected"}:
+                    send_topup_methods(chat_id, req)
+                else:
+                    send_topup_deposit_info(chat_id, req)
+
+        elif data.startswith("topup_stars_"):
+            request_id = int(data.split("_")[-1])
+            req = get_topup_request_for_user(chat_id, request_id)
+            if req:
+                if req["status"] in {"approved", "rejected"}:
+                    send_topup_methods(chat_id, req)
+                else:
+                    send_topup_stars_invoice(chat_id, req)
 
         elif data.startswith("select_prod_"):
             key = data.replace("select_prod_", "")
@@ -899,6 +1065,34 @@ def handle_pre_checkout_query(query):
 def handle_successful_payment(message):
     payment = message.successful_payment
     payload = payment.invoice_payload
+    topup_request_id = topup_stars_payload_map.get(payload)
+    if payload.startswith("topup_stars_") and not topup_request_id:
+        parts = payload.split("_")
+        if len(parts) >= 5 and parts[3].isdigit():
+            topup_request_id = int(parts[3])
+
+    if payload.startswith("topup_stars_") and topup_request_id:
+        req = get_topup_request(topup_request_id)
+        if req and req["status"] in {"created", "reported"}:
+            update_balance(req["chat_id"], req["amount_grosze"])
+            set_topup_status(topup_request_id, "approved")
+            new_balance = get_balance(req["chat_id"])
+            bot.send_message(
+                req["chat_id"],
+                (
+                    "✅ Doładowanie STARS zakończone sukcesem.\n\n"
+                    f"Kwota: {fmt_pln(req['amount_grosze'])}\n"
+                    f"Nowe saldo: {fmt_pln(new_balance)}"
+                ),
+            )
+        elif req and req["status"] == "approved":
+            bot.send_message(
+                message.chat.id,
+                "To doładowanie było już wcześniej zatwierdzone.",
+            )
+        topup_stars_payload_map.pop(payload, None)
+        return
+
     order = stars_payload_map.get(payload)
 
     if payload.startswith("stars_") and order:
